@@ -1,5 +1,5 @@
 # redirector
-A simple redirect server
+A simple asynchronous Rust/hyper based webserver to redirect http requests
 
 ## Environment variables:
 * `LOCATION` Required value that gets placed in the http Location header. Example: `https://edac.io`
