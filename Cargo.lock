@@ -1,5 +1,5 @@
 [root]
-name = "redirect"
+name = "redirector"
 version = "0.1.0"
 dependencies = [
  "futures 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
