@@ -62,7 +62,7 @@ fn main() {
     };
     let mut core = Core::new().unwrap();
     let handle = core.handle();
-    let srv = Http::new().serve_addr_handle(&address, &handle, || Ok(Redirect{ location: &LOCATION, server: &SERVER })).unwrap();
+    let srv = Http::new().sleep_on_errors(true).serve_addr_handle(&address, &handle, || Ok(Redirect{ location: &LOCATION, server: &SERVER })).unwrap();
     println!("Listening to {}", address);
     let handle1 = handle.clone();
     handle.spawn(srv.for_each(move |conn| {
