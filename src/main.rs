@@ -1,39 +1,10 @@
 extern crate hyper;
 extern crate futures;
-extern crate tokio_core;
 #[macro_use] extern crate lazy_static;
 
-use futures::{Future, Stream};
-use hyper::StatusCode;
-use hyper::header::{ContentLength, Location, Server};
-use hyper::server::{Http, Request, Response, Service};
-use tokio_core::reactor::Core;
+use futures::{future, Future};
+use hyper::{http::response::Builder, service::service_fn, Body, Request, Response, Server, StatusCode};
 use std::env;
-
-struct Redirect<'a> {
-    location: &'a str,
-    server: &'a str,
-}
-
-impl<'a> Service for Redirect<'a> {
-    type Request = Request;
-    type Response = Response;
-    type Error = hyper::Error;
-    type Future = futures::future::FutureResult<Self::Response, Self::Error>;
-
-    fn call(&self, req: Request) -> Self::Future {
-        // Build a Response with the redrected path, and return
-        // an 'ok' Future, which means it's immediatly ready.
-        let location = self.location.to_string() + &(req.path())[..];
-        futures::future::ok(
-            Response::new()
-                .with_status(StatusCode::Found)
-                .with_header(Server::new(self.server.to_string()))
-                .with_header(Location::new(location))
-                .with_header(ContentLength(0u64))
-        )
-    }
-}
 
 //const LOCATION: &'static str = "https://edac.io";
 // example: LOCATION=https://edac.io
@@ -55,19 +26,25 @@ lazy_static! {
     };
 }
 
+fn redirect(req: Request<Body>) -> Box<Future<Item=Response<Body>, Error=hyper::Error> + Send> {
+    // Build a Response with the redrected path
+    let location = (&*LOCATION).to_string() + &(req.uri().path())[..];
+    Box::new(future::ok(Builder::new()
+        .status(StatusCode::FOUND)
+        .header("server", (&*SERVER).to_string())
+        .header("location", location)
+        .body(Body::empty())
+        .unwrap()))
+}
+
 fn main() {
     let address = match std::env::var("ADDRESS") {
         Ok(a) => a.parse().unwrap(),
         Err(_)  => "0.0.0.0:8080".parse().unwrap(),
     };
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
-    let srv = Http::new().sleep_on_errors(true).serve_addr_handle(&address, &handle, || Ok(Redirect{ location: &LOCATION, server: &SERVER })).unwrap();
+    let server = Server::bind(&address)
+        .serve(|| service_fn(redirect))
+        .map_err(|e| eprintln!("ERROR: {}", e));
     println!("Listening to {}", address);
-    let handle1 = handle.clone();
-    handle.spawn(srv.for_each(move |conn| {
-        handle1.spawn(conn.map(|_| ()).map_err(|err| println!("server error: {:?}", err)));
-        Ok(())
-    }).map_err(|_| ()));
-    core.run(futures::future::empty::<(), ()>()).unwrap();
+    hyper::rt::run(server);
 }
