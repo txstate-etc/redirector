@@ -1,0 +1,9 @@
+[package]
+name = "health"
+version = "0.1.0"
+authors = ["Charles Tabor <chastabor@gmail.com>"]
+
+[dependencies]
+hyper = "0.12.23"
+futures = "0.1.25"
+lazy_static = "1.0.0"
