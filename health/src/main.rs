@@ -6,13 +6,23 @@ use futures::Future;
 use hyper::{rt, Client, StatusCode, Uri};
 use std::env;
 
-//const LOCATION: &'static str = "https://edac.io";
+// LOCATION is what should be found in the location header returned back from redirector;
 // example: LOCATION=https://edac.io
 lazy_static! {
     static ref LOCATION: String = {
         match env::var("LOCATION") {
-            Ok(location) => location,
+            Ok(location) => location + "/health",
             Err(_) => panic!("No redirect location specified"),
+        }
+    };
+}
+
+// HEALTH environment variable holds url to test redirector
+lazy_static! {
+    static ref HEALTH: String = {
+        match env::var("HEALTH") {
+            Ok(health) => health + "/health",
+            Err(_) => panic!("http://localhost:8080/health"),
         }
     };
 }
@@ -57,9 +67,6 @@ fn fetch_url(url: hyper::Uri) -> impl Future<Item=(), Error=()> {
 }
 
 fn main() {
-    let url: Uri = match std::env::var("HEALTH") {
-        Ok(a) => a.parse().unwrap(),
-        Err(_)  => "0.0.0.0:8080".parse().unwrap(),
-    };
+    let url: Uri = (&*HEALTH).parse().unwrap();
     rt::run(fetch_url(url));
 }
