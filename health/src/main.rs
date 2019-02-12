@@ -22,7 +22,7 @@ lazy_static! {
     static ref HEALTH: String = {
         match env::var("HEALTH") {
             Ok(health) => health + "/health",
-            Err(_) => panic!("http://localhost:8080/health"),
+            Err(_) => "http://localhost:8080/health".to_string(),
         }
     };
 }
