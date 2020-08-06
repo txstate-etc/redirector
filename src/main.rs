@@ -1,10 +1,9 @@
-extern crate hyper;
-extern crate futures;
 #[macro_use] extern crate lazy_static;
-
-use futures::{future, Future};
-use hyper::{http::response::Builder, service::service_fn, Body, Request, Response, Server, StatusCode};
 use std::env;
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use hyper::{Body, Request, Response, Server, StatusCode};
+use hyper::service::{make_service_fn, service_fn};
 
 //const LOCATION: &'static str = "https://edac.io";
 // example: LOCATION=https://edac.io
@@ -26,25 +25,43 @@ lazy_static! {
     };
 }
 
-fn redirect(req: Request<Body>) -> Box<Future<Item=Response<Body>, Error=hyper::Error> + Send> {
-    // Build a Response with the redrected path
-    let location = (&*LOCATION).to_string() + &(req.uri().path())[..];
-    Box::new(future::ok(Builder::new()
-        .status(StatusCode::FOUND)
-        .header("server", (&*SERVER).to_string())
-        .header("location", location)
-        .body(Body::empty())
-        .unwrap()))
+async fn shutdown_signal() {
+    // Wait for the CTRL+C signal
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install CTRL+C signal handler");
 }
 
-fn main() {
-    let address = match std::env::var("ADDRESS") {
-        Ok(a) => a.parse().unwrap(),
-        Err(_)  => "0.0.0.0:8080".parse().unwrap(),
-    };
-    let server = Server::bind(&address)
-        .serve(|| service_fn(redirect))
-        .map_err(|e| eprintln!("ERROR: {}", e));
-    println!("Listening to {}", address);
-    hyper::rt::run(server);
+async fn redirect(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    // Build a Response with the redrected path
+    let location = (&*LOCATION).to_string() + &(req.uri().path())[..];
+    let res = Response::builder()
+        .status(StatusCode::FOUND)
+        .header("Server", (&*SERVER).to_string())
+        .header("Location", location)
+        .body(Body::empty());
+    match res {
+        Ok(res) => Ok(res),
+        Err(error) => {
+            Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(format!("Internal Server Error: {}", error))).unwrap())
+        },
+    }
+
+}
+
+#[tokio::main]
+async fn main() {
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let svc = make_service_fn(|_conn| async {
+        // service_fn converts our function into a `Service`
+        Ok::<_, Infallible>(service_fn(redirect))
+    });
+    let server = Server::bind(&addr).serve(svc);
+    let graceful = server.with_graceful_shutdown(shutdown_signal());
+    println!("Listening to {}", addr);
+    if let Err(e) = graceful.await {
+        eprintln!("server error: {}", e);
+    }
 }

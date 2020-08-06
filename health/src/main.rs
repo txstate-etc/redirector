@@ -1,10 +1,8 @@
-extern crate hyper;
-extern crate futures;
 #[macro_use] extern crate lazy_static;
-
-use futures::Future;
-use hyper::{rt, Client, StatusCode, Uri};
+use std::fmt;
 use std::env;
+use hyper::{Client, StatusCode, Uri};
+use std::error::Error;
 
 // LOCATION is what should be found in the location header returned back from redirector;
 // example: LOCATION=https://edac.io
@@ -22,51 +20,64 @@ lazy_static! {
     static ref HEALTH: String = {
         match env::var("HEALTH") {
             Ok(health) => health + "/health",
-            Err(_) => "http://localhost:8080/health".to_string(),
+            Err(_) => "http://localhost:3000/health".to_string(),
         }
     };
 }
 
-lazy_static! {
-    static ref SERVER: String = {
-        match env::var("SERVER") {
-            Ok(server) => server,
-            Err(_) => "Hyper".to_string(),
+#[derive(Debug)]
+enum HealthCheckError {
+    NonRedirect(StatusCode),
+    //println!("Non redirect status returned: {}", res.status());
+    InvalidLocation(String),
+    //println!("Invalid redirect location returned {}", l);
+    UnreadableLocation(hyper::header::ToStrError),
+    //println!("Error reading location header {}", e);
+    NoLocationFound,
+    //println!("No location header found");
+}
+
+impl fmt::Display for HealthCheckError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HealthCheckError::NonRedirect(status_code) => write!(f, "Non redirect status returned: {}", status_code),
+            HealthCheckError::InvalidLocation(location) => write!(f, "Invalid redirect location returned {}", location),
+            HealthCheckError::UnreadableLocation(error) => write!(f, "Error reading location header {}", error),
+            HealthCheckError::NoLocationFound => write!(f, "No location header found"),
         }
-    };
+    }
 }
 
-fn fetch_url(url: hyper::Uri) -> impl Future<Item=(), Error=()> {
-    let client = Client::new();
-    client
-        .get(url)
-        .map(|res| {
-            if res.status() != StatusCode::FOUND {
-                println!("Invalid redirect status returned: {}", res.status());
-                std::process::exit(1);
-            }
-            if let Some(location) = res.headers().get("location") {
-                match location.to_str() {
-                    Ok(l) => if l != &*LOCATION {
-                        println!("Invalid redirect location returned {}", l);
-                        std::process::exit(1);
-                    },
-                    Err(e) => {
-                        println!("Error reading location header {}", e);
-                        std::process::exit(1);
-                    },
-                }
-            } else {
-                println!("No location header found");
-                std::process::exit(1);
-            }
-        })
-        .map_err(|err| {
-            println!("Error: {}", err);
-        })
+impl Error for HealthCheckError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            HealthCheckError::NonRedirect(_status_code) => None,
+            HealthCheckError::InvalidLocation(_location) => None,
+            HealthCheckError::UnreadableLocation(error) => Some(error),
+            HealthCheckError::NoLocationFound => None,
+        }
+    }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let url: Uri = (&*HEALTH).parse().unwrap();
-    rt::run(fetch_url(url));
+    let client = Client::new();
+    let res = client.get(url).await?;
+    if res.status() != StatusCode::FOUND {
+        Err(HealthCheckError::NonRedirect(res.status()))?
+    } else if let Some(location) = res.headers().get("location") {
+        match location.to_str() {
+            Ok(l) => if l != &*LOCATION {
+                Err(HealthCheckError::InvalidLocation(l.to_string()))?
+            } else {
+                Ok(())
+            },
+            Err(e) => {
+                Err(HealthCheckError::UnreadableLocation(e))?
+            },
+        }
+    } else {
+        Err(HealthCheckError::NoLocationFound)?
+    }
 }
