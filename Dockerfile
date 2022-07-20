@@ -1,4 +1,4 @@
-FROM rust:1.45 AS build
+FROM rust:1.62 AS build
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get -y install musl-dev musl-tools \
